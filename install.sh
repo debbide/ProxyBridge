@@ -7,7 +7,6 @@ INSTALL_DIR="/opt/proxybridge"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 LATEST_RELEASE_URL="https://github.com/debbide/ProxyBridge/releases/latest"
 TEMP_DIR=""
-BACKUP_DIR=""
 
 cleanup() {
   [[ -n "${TEMP_DIR}" && -d "${TEMP_DIR}" ]] && rm -rf "${TEMP_DIR}"
@@ -276,7 +275,7 @@ update_proxybridge() {
   copy_release_files
   write_service
   systemctl daemon-reload
-  systemctl start "${SERVICE_NAME}"
+  systemctl enable --now "${SERVICE_NAME}"
   echo "ProxyBridge 已更新到 v${RELEASE_VERSION}。"
 }
 

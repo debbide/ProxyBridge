@@ -1,0 +1,23 @@
+.omo/
+
+# Dependencies
+node_modules/
+backend/node_modules/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Editor and operating system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

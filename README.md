@@ -2,37 +2,17 @@
 
 ProxyBridge 是一个轻量的本地代理端口管理器，支持集中添加上游代理、自动分配本地端口、启停节点和代理测速。
 
-## 一键安装
+## 交互式管理
 
-适用于使用 systemd 的 Debian 或 Ubuntu。安装脚本会通过 GitHub Releases API 查询最新正式版本，显示版本号并下载对应 Release，而不是直接安装 `master` 分支。执行后会交互选择管理面板监听 `127.0.0.1` 或 `0.0.0.0`，并要求设置管理端口和管理员密码。
+适用于使用 systemd 的 Debian 或 Ubuntu。一个交互式脚本统一提供安装、更新和卸载功能：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/debbide/ProxyBridge/master/install.sh | sudo bash
 ```
 
-脚本默认安装到 `/opt/proxybridge`，创建并启动 `proxybridge.service`。代理节点端口默认仅监听 `127.0.0.1`。
+脚本会显示操作菜单。安装和更新都会通过 GitHub Releases API 获取最新正式版本并显示版本号。更新会保留管理员配置、加密密钥和代理数据库，启动失败时自动恢复更新前版本。卸载可选择保留配置和数据，或输入 `DELETE` 彻底删除。
 
-## 卸载
-
-卸载程序但保留管理员配置、加密密钥和代理数据库：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/debbide/ProxyBridge/master/install.sh | sudo bash -s -- --uninstall
-```
-
-彻底卸载程序并删除全部配置和代理数据。执行时需要输入 `DELETE` 确认：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/debbide/ProxyBridge/master/install.sh | sudo bash -s -- --purge
-```
-
-## 一键更新
-
-更新会保留现有的管理员配置、加密密钥和代理数据库，并在失败时自动恢复更新前版本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/debbide/ProxyBridge/master/update.sh | sudo bash
-```
+程序默认安装到 `/opt/proxybridge`，创建并启动 `proxybridge.service`。代理节点端口默认仅监听 `127.0.0.1`。
 
 ## 服务管理
 

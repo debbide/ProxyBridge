@@ -5,7 +5,7 @@ set -Eeuo pipefail
 SERVICE_NAME="proxybridge"
 INSTALL_DIR="/opt/proxybridge"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-RELEASE_API_URL="https://api.github.com/repos/debbide/ProxyBridge/releases/latest"
+LATEST_RELEASE_URL="https://github.com/debbide/ProxyBridge/releases/latest"
 TEMP_DIR=""
 BACKUP_DIR=""
 
@@ -47,20 +47,17 @@ require_download_tools() {
 }
 
 download_latest_release() {
-  local metadata release_tag archive_url
+  local release_url release_tag archive_url
 
   require_download_tools
   echo "正在查询 GitHub 最新正式版本..."
-  metadata="$(curl -fsSL --connect-timeout 10 --max-time 30 \
-    -H "Accept: application/vnd.github+json" \
-    -H "User-Agent: ProxyBridge-Installer" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${RELEASE_API_URL}")" || {
-      echo "错误：无法获取最新 Release 信息。"
+  release_url="$(curl -fsSL --connect-timeout 10 --max-time 30 \
+    -o /dev/null -w '%{url_effective}' "${LATEST_RELEASE_URL}")" || {
+      echo "错误：无法获取最新 Release 地址。"
       exit 1
     }
 
-  release_tag="$(printf '%s' "${metadata}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  release_tag="${release_url##*/tag/}"
   if [[ -z "${release_tag}" || ! "${release_tag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
     echo "错误：GitHub 仓库尚未发布有效的正式版本。"
     exit 1

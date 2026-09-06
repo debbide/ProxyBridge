@@ -6,6 +6,7 @@ const { ProxyDatabase } = require('./database');
 const { createAuth } = require('./auth');
 const { PortManager, parseProxyUri, sanitizeProxy } = require('./port-manager');
 const { createProxyCrypto } = require('./proxy-crypto');
+const { checkVersion } = require('./version-checker');
 
 function parseProxyInput(input, fallbackName = '') {
   const value = typeof input === 'string' ? input.trim() : '';
@@ -54,6 +55,10 @@ function createApplication(options = {}) {
 
   api.get('/proxies', (req, res) => {
     res.json(database.listProxies().map(sanitizeProxy));
+  });
+
+  api.get('/version', async (req, res) => {
+    res.json(await checkVersion());
   });
 
   api.post('/proxies', async (req, res, next) => {

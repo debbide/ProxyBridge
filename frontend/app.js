@@ -19,6 +19,8 @@ createApp({
       nameDraft: '',
       savingName: {},
       deleteTarget: null,
+      versionInfo: null,
+      versionLoading: false,
       notices: []
     };
   },
@@ -28,7 +30,10 @@ createApp({
     }
   },
   mounted() {
-    if (this.token) this.loadProxies();
+    if (this.token) {
+      this.loadProxies();
+      this.loadVersion();
+    }
   },
   methods: {
     async request(path, options = {}) {
@@ -52,7 +57,7 @@ createApp({
         this.token = data.token;
         localStorage.setItem('proxy-manager-token', data.token);
         this.password = '';
-        await this.loadProxies();
+        await Promise.all([this.loadProxies(), this.loadVersion()]);
         this.notify('登录成功', 'success');
       } catch (error) {
         this.notify(error.message, 'error');
@@ -63,6 +68,7 @@ createApp({
     logout(message) {
       this.token = '';
       this.proxies = [];
+      this.versionInfo = null;
       localStorage.removeItem('proxy-manager-token');
       if (typeof message === 'string') this.notify(message, 'error');
     },
@@ -74,6 +80,23 @@ createApp({
         if (this.token) this.notify(error.message, 'error');
       } finally {
         this.listLoading = false;
+      }
+    },
+    async loadVersion() {
+      this.versionLoading = true;
+      try {
+        this.versionInfo = await this.request('/api/version');
+      } catch (error) {
+        if (this.token) {
+          this.versionInfo = {
+            currentVersion: this.versionInfo?.currentVersion || null,
+            latestVersion: null,
+            updateAvailable: false,
+            status: 'error'
+          };
+        }
+      } finally {
+        this.versionLoading = false;
       }
     },
     openAddModal() {

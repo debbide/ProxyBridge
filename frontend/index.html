@@ -37,10 +37,27 @@
             </span>
             <div><strong>Proxy Manager</strong><small>多端口代理映射池</small></div>
           </div>
-          <button class="button button-ghost" @click="logout" aria-label="退出登录">
-            <svg viewBox="0 0 24 24"><path d="M10 17v3H5V4h5v3h2V2H3v20h9v-5h-2Zm9-6-3-3-1.4 1.4 1.6 1.6H9v2h7.2l-1.6 1.6L16 16l5-5Z"/></svg>
-            退出
-          </button>
+          <div class="topbar-actions">
+            <div class="version-panel" aria-live="polite">
+              <div class="version-summary">
+                <span>当前版本</span>
+                <strong>{{ versionInfo?.currentVersion ? `v${versionInfo.currentVersion}` : '读取中' }}</strong>
+                <span v-if="versionInfo?.status === 'ok'" class="version-state" :class="{ available: versionInfo.updateAvailable }">
+                  {{ versionInfo.updateAvailable ? `发现 v${versionInfo.latestVersion}` : '已是最新' }}
+                </span>
+                <span v-else-if="versionInfo && !versionLoading" class="version-state unavailable">暂时无法检测</span>
+              </div>
+              <a v-if="versionInfo?.updateAvailable && versionInfo.releaseUrl" class="version-release-link" :href="versionInfo.releaseUrl" target="_blank" rel="noopener noreferrer">查看 Release</a>
+              <button class="icon-button version-check" type="button" @click="loadVersion" :disabled="versionLoading" aria-label="检查最新版本" title="检查最新版本">
+                <span v-if="versionLoading" class="spinner spinner-dark"></span>
+                <svg v-else viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"/></svg>
+              </button>
+            </div>
+            <button class="button button-ghost" @click="logout" aria-label="退出登录">
+              <svg viewBox="0 0 24 24"><path d="M10 17v3H5V4h5v3h2V2H3v20h9v-5h-2Zm9-6-3-3-1.4 1.4 1.6 1.6H9v2h7.2l-1.6 1.6L16 16l5-5Z"/></svg>
+              退出
+            </button>
+          </div>
         </div>
       </header>
 

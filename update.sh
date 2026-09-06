@@ -37,6 +37,10 @@ if [[ ! -f "${TEMP_DIR}/backend/package.json" || ! -f "${TEMP_DIR}/backend/serve
   exit 1
 fi
 
+# Complete all network and dependency work before stopping the running service.
+(cd "${TEMP_DIR}/backend" && npm pkg set "version=${release_version}")
+(cd "${TEMP_DIR}/backend" && npm ci --omit=dev)
+
 systemctl stop "${SERVICE_NAME}"
 
 mkdir -p "${INSTALL_DIR}/backend" "${INSTALL_DIR}/frontend"
@@ -47,16 +51,13 @@ find "${INSTALL_DIR}/frontend" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 for source in "${TEMP_DIR}/backend/"* "${TEMP_DIR}/backend/".[!.]* "${TEMP_DIR}/backend/"..?*; do
   [[ -e "${source}" ]] || continue
   case "$(basename "${source}")" in
-    node_modules|data|.env) continue ;;
+    data|.env) continue ;;
   esac
   cp -a "${source}" "${INSTALL_DIR}/backend/"
 done
 
 cp -a "${TEMP_DIR}/frontend/." "${INSTALL_DIR}/frontend/"
 install -m 0755 "${TEMP_DIR}/update.sh" "${INSTALL_DIR}/update.sh"
-
-(cd "${INSTALL_DIR}/backend" && npm pkg set "version=${release_version}")
-(cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
 
 systemctl daemon-reload
 systemctl restart "${SERVICE_NAME}"

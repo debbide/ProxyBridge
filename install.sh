@@ -47,7 +47,7 @@ require_download_tools() {
 }
 
 download_latest_release() {
-  local release_url release_tag archive_url archive_version tag_version
+  local release_url release_tag archive_url
 
   require_download_tools
   echo "正在查询 GitHub 最新正式版本..."
@@ -74,20 +74,7 @@ download_latest_release() {
     exit 1
   fi
 
-  archive_version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${TEMP_DIR}/backend/package.json" | head -n 1)"
-  if [[ -z "${archive_version}" ]]; then
-    echo "错误：无法读取 Release 版本号。"
-    exit 1
-  fi
-
-  tag_version="${release_tag#v}"
-  if [[ "${archive_version}" != "${tag_version}" ]]; then
-    echo "错误：Release 标签 ${release_tag} 与归档版本 v${archive_version} 不一致，已停止安装。"
-    echo "请发布版本号一致的新 Release 后重试。"
-    exit 1
-  fi
-
-  RELEASE_VERSION="${tag_version}"
+  RELEASE_VERSION="${release_tag#v}"
   echo "最新正式版本：v${RELEASE_VERSION}"
 }
 

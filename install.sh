@@ -252,9 +252,14 @@ EOF
 
 rollback_update() {
   echo "更新失败，正在恢复更新前版本..."
+  trap - ERR
+  if [[ -z "${BACKUP_DIR}" || ! -d "${BACKUP_DIR}" ]]; then
+    echo "错误：更新失败，但尚未创建备份；现有安装未被替换。"
+    return 1
+  fi
   rm -rf "${INSTALL_DIR}"
   mv "${BACKUP_DIR}" "${INSTALL_DIR}"
-  systemctl start "${SERVICE_NAME}" || true
+  BACKUP_DIR=""
 }
 
 update_proxybridge() {
@@ -279,21 +284,11 @@ update_proxybridge() {
   (cd "${TEMP_DIR}/backend" && npm ci --omit=dev)
   BACKUP_DIR="${INSTALL_DIR}.backup.$(date +%Y%m%d%H%M%S)"
 
-  echo "正在停止服务并备份当前版本..."
-  systemctl stop "${SERVICE_NAME}"
+  echo "正在备份当前版本..."
   cp -a "${INSTALL_DIR}" "${BACKUP_DIR}"
   trap rollback_update ERR
 
   copy_release_files
-  write_service
-  systemctl daemon-reload
-  systemctl start "${SERVICE_NAME}"
-  sleep 2
-
-  if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
-    echo "服务未能正常启动。"
-    false
-  fi
 
   trap - ERR
   rm -rf "${BACKUP_DIR}"

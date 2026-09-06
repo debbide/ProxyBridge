@@ -267,12 +267,13 @@ update_proxybridge() {
     *) echo "已取消更新。"; return ;;
   esac
 
-  echo "正在安装生产依赖..."
-  (cd "${TEMP_DIR}/backend" && npm ci --omit=dev)
-
   echo "正在停止服务并更新文件..."
   systemctl stop "${SERVICE_NAME}"
   copy_release_files
+
+  echo "正在安装生产依赖..."
+  (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
+
   write_service
   systemctl daemon-reload
   systemctl enable --now "${SERVICE_NAME}"

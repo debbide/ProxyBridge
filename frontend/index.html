@@ -48,6 +48,10 @@
                 <span v-else-if="versionInfo && !versionLoading" class="version-state unavailable">暂时无法检测</span>
               </div>
               <a v-if="versionInfo?.updateAvailable && versionInfo.releaseUrl" class="version-release-link" :href="versionInfo.releaseUrl" target="_blank" rel="noopener noreferrer">查看 Release</a>
+              <button v-if="versionInfo?.updateAvailable" class="button button-update" type="button" @click="openUpdateConfirm" :disabled="updateLoading || updateTargetVersion">
+                <span v-if="updateLoading || updateTargetVersion" class="spinner"></span>
+                {{ updateTargetVersion ? `正在更新到 v${updateTargetVersion}` : `更新到 v${versionInfo.latestVersion}` }}
+              </button>
               <button class="icon-button version-check" type="button" @click="loadVersion" :disabled="versionLoading" aria-label="检查最新版本" title="检查最新版本">
                 <span v-if="versionLoading" class="spinner spinner-dark"></span>
                 <svg v-else viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"/></svg>
@@ -143,6 +147,20 @@
         <div class="modal-icon"><svg viewBox="0 0 24 24"><path d="M11 7h2v6h-2V7Zm0 8h2v2h-2v-2Zm1-13L1 21h22L12 2Zm0 4 7.5 13h-15L12 6Z"/></svg></div>
         <h2 id="delete-title">删除代理节点？</h2><p>即将删除“{{ deleteTarget.name }}”。若端口正在运行，转发服务会同时停止，此操作无法撤销。</p>
         <div class="modal-actions"><button class="button button-secondary" @click="deleteTarget = null" :disabled="deleteLoading">取消</button><button class="button button-danger" @click="deleteProxy" :disabled="deleteLoading"><span v-if="deleteLoading" class="spinner"></span>确认删除</button></div>
+      </section>
+    </div>
+
+    <div v-if="updateConfirmOpen" class="modal-backdrop" @click.self="closeUpdateConfirm">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
+        <div class="modal-icon update-icon"><svg viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"/></svg></div>
+        <h2 id="update-title">更新 ProxyBridge？</h2>
+        <p>将更新到 v{{ versionInfo?.latestVersion }}。配置和代理数据会保留，服务更新期间会短暂断开并自动恢复。</p>
+        <div class="modal-actions">
+          <button class="button button-secondary" type="button" @click="closeUpdateConfirm" :disabled="updateLoading">取消</button>
+          <button class="button button-primary" type="button" @click="startPanelUpdate" :disabled="updateLoading">
+            <span v-if="updateLoading" class="spinner"></span>{{ updateLoading ? '正在启动更新' : '确认更新' }}
+          </button>
+        </div>
       </section>
     </div>
 

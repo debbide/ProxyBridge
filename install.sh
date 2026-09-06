@@ -5,6 +5,7 @@ set -Eeuo pipefail
 SERVICE_NAME="proxybridge"
 INSTALL_DIR="/opt/proxybridge"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+UPDATE_SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}-update.service"
 LATEST_RELEASE_URL="https://github.com/debbide/ProxyBridge/releases/latest"
 TEMP_DIR=""
 
@@ -146,6 +147,20 @@ WantedBy=multi-user.target
 EOF
 }
 
+write_update_service() {
+  install -m 0755 "${TEMP_DIR}/update.sh" "${INSTALL_DIR}/update.sh"
+  cat > "${UPDATE_SERVICE_FILE}" <<EOF
+[Unit]
+Description=ProxyBridge update service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${INSTALL_DIR}/update.sh
+EOF
+}
+
 install_proxybridge() {
   local host port admin_password admin_password_confirm jwt_secret encryption_key
 
@@ -162,6 +177,7 @@ install_proxybridge() {
     write_installed_version
     (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
     write_service
+    write_update_service
     systemctl daemon-reload
     systemctl enable --now "${SERVICE_NAME}"
     sleep 2
@@ -241,6 +257,7 @@ EOF
 
   (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
   write_service
+  write_update_service
   systemctl daemon-reload
   systemctl enable --now "${SERVICE_NAME}"
   sleep 2
@@ -282,6 +299,7 @@ update_proxybridge() {
   (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
 
   write_service
+  write_update_service
   systemctl daemon-reload
   systemctl enable --now "${SERVICE_NAME}"
   echo "ProxyBridge 已更新到 v${RELEASE_VERSION}。"
@@ -303,6 +321,7 @@ uninstall_proxybridge() {
     1)
       systemctl disable --now "${SERVICE_NAME}" >/dev/null 2>&1 || true
       rm -f "${SERVICE_FILE}"
+      rm -f "${UPDATE_SERVICE_FILE}"
       systemctl daemon-reload
       if [[ -d "${INSTALL_DIR}" ]]; then
         find "${INSTALL_DIR}" -mindepth 1 -maxdepth 1 ! -name backend -exec rm -rf {} +
@@ -316,6 +335,7 @@ uninstall_proxybridge() {
     2)
       systemctl disable --now "${SERVICE_NAME}" >/dev/null 2>&1 || true
       rm -f "${SERVICE_FILE}"
+      rm -f "${UPDATE_SERVICE_FILE}"
       systemctl daemon-reload
       rm -rf "${INSTALL_DIR}"
       echo "ProxyBridge 及全部数据已删除。"

@@ -7,6 +7,7 @@ const { createAuth } = require('./auth');
 const { PortManager, parseProxyUri, sanitizeProxy } = require('./port-manager');
 const { createProxyCrypto } = require('./proxy-crypto');
 const { checkVersion } = require('./version-checker');
+const { startUpdate } = require('./updater');
 
 function parseProxyInput(input, fallbackName = '') {
   const value = typeof input === 'string' ? input.trim() : '';
@@ -27,6 +28,8 @@ function parseProxyInput(input, fallbackName = '') {
 }
 
 function createApplication(options = {}) {
+  const getVersion = options.checkVersion || checkVersion;
+  const beginUpdate = options.startUpdate || startUpdate;
   const proxyCrypto = options.proxyCrypto || createProxyCrypto(
     process.env.PROXY_ENCRYPTION_KEY || process.env.JWT_SECRET || 'development-secret-change-me'
   );
@@ -58,7 +61,26 @@ function createApplication(options = {}) {
   });
 
   api.get('/version', async (req, res) => {
-    res.json(await checkVersion());
+    res.json(await getVersion());
+  });
+
+  api.post('/update', async (req, res, next) => {
+    try {
+      const version = await getVersion();
+      if (version.status !== 'ok') {
+        return res.status(503).json({ error: '暂时无法检查最新版本' });
+      }
+      if (!version.updateAvailable) {
+        return res.json({ status: 'current', currentVersion: version.currentVersion });
+      }
+      await beginUpdate();
+      return res.status(202).json({ status: 'started', targetVersion: version.latestVersion });
+    } catch (error) {
+      if (error.statusCode === 409) {
+        return res.status(409).json({ error: error.message });
+      }
+      return next(error);
+    }
   });
 
   api.post('/proxies', async (req, res, next) => {

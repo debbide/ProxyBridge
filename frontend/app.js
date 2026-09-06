@@ -21,6 +21,11 @@ createApp({
       deleteTarget: null,
       versionInfo: null,
       versionLoading: false,
+      updateConfirmOpen: false,
+      updateLoading: false,
+      updateTargetVersion: null,
+      updatePollTimer: null,
+      updatePollStartedAt: 0,
       notices: []
     };
   },
@@ -34,6 +39,9 @@ createApp({
       this.loadProxies();
       this.loadVersion();
     }
+  },
+  beforeUnmount() {
+    this.stopUpdatePolling();
   },
   methods: {
     async request(path, options = {}) {
@@ -66,6 +74,7 @@ createApp({
       }
     },
     logout(message) {
+      this.stopUpdatePolling();
       this.token = '';
       this.proxies = [];
       this.versionInfo = null;
@@ -98,6 +107,74 @@ createApp({
       } finally {
         this.versionLoading = false;
       }
+    },
+    openUpdateConfirm() {
+      if (!this.versionInfo?.updateAvailable || this.updateLoading) return;
+      this.updateConfirmOpen = true;
+    },
+    closeUpdateConfirm() {
+      if (this.updateLoading) return;
+      this.updateConfirmOpen = false;
+    },
+    async startPanelUpdate() {
+      this.updateLoading = true;
+      try {
+        const result = await this.request('/api/update', { method: 'POST' });
+        this.updateConfirmOpen = false;
+        if (result.status === 'current') {
+          await this.loadVersion();
+          this.notify('当前已是最新版本', 'success');
+          return;
+        }
+        this.updateTargetVersion = result.targetVersion;
+        this.updatePollStartedAt = Date.now();
+        this.notify(`正在更新到 v${result.targetVersion}，服务将短暂重启`, 'info');
+        this.scheduleUpdatePoll();
+      } catch (error) {
+        this.notify(error.message, 'error');
+      } finally {
+        this.updateLoading = false;
+      }
+    },
+    scheduleUpdatePoll() {
+      this.stopUpdatePolling();
+      this.updatePollTimer = window.setTimeout(() => this.pollUpdateVersion(), 2000);
+    },
+    stopUpdatePolling() {
+      if (this.updatePollTimer) {
+        window.clearTimeout(this.updatePollTimer);
+        this.updatePollTimer = null;
+      }
+    },
+    async pollUpdateVersion() {
+      const targetVersion = this.updateTargetVersion;
+      if (!targetVersion || !this.token) return;
+      if (Date.now() - this.updatePollStartedAt > 120000) {
+        this.stopUpdatePolling();
+        this.updateTargetVersion = null;
+        this.notify('更新等待超时，请稍后重新检查版本', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/version', {
+          headers: { Authorization: `Bearer ${this.token}` },
+          cache: 'no-store'
+        });
+        if (response.ok) {
+          const version = await response.json();
+          this.versionInfo = version;
+          if (version.currentVersion === targetVersion) {
+            this.stopUpdatePolling();
+            this.updateTargetVersion = null;
+            this.notify(`已更新到 v${targetVersion}`, 'success');
+            return;
+          }
+        }
+      } catch (error) {
+        // The service is temporarily unavailable while systemd restarts it.
+      }
+      this.scheduleUpdatePoll();
     },
     openAddModal() {
       this.addModalOpen = true;

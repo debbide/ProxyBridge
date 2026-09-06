@@ -1,7 +1,7 @@
 const https = require('node:https');
 const { version: currentVersion } = require('./package.json');
 
-const RELEASE_API_URL = 'https://api.github.com/repos/debbide/ProxyBridge/releases/latest';
+const LATEST_RELEASE_URL = 'https://github.com/debbide/ProxyBridge/releases/latest';
 
 function normalizeVersion(version) {
   return String(version || '').trim().replace(/^v/i, '');
@@ -21,33 +21,24 @@ function compareVersions(left, right) {
 
 function requestLatestRelease({ request = https.get, timeoutMs = 8000 } = {}) {
   return new Promise((resolve, reject) => {
-    const req = request(RELEASE_API_URL, {
+    const req = request(LATEST_RELEASE_URL, {
       headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': `ProxyBridge/${currentVersion}`,
-        'X-GitHub-Api-Version': '2022-11-28'
+        'User-Agent': `ProxyBridge/${currentVersion}`
       }
     }, (res) => {
-      const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        if (res.statusCode === 404) {
-          resolve(null);
-          return;
-        }
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`GitHub API returned HTTP ${res.statusCode}`));
-          return;
-        }
+      const location = res.headers.location || '';
+      const match = location.match(/\/releases\/tag\/([^/?#]+)/);
+      res.resume();
 
-        try {
-          const release = JSON.parse(body);
-          resolve(release.draft || release.prerelease ? null : release);
-        } catch (error) {
-          reject(new Error('GitHub API returned invalid JSON'));
-        }
-      });
+      if (match) {
+        resolve({ tag_name: decodeURIComponent(match[1]), html_url: location });
+        return;
+      }
+      if (res.statusCode === 404) {
+        resolve(null);
+        return;
+      }
+      reject(new Error(`GitHub release returned HTTP ${res.statusCode}`));
     });
 
     req.setTimeout(timeoutMs, () => req.destroy(new Error('GitHub API request timed out')));

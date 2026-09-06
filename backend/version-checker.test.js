@@ -9,7 +9,7 @@ const {
   requestLatestRelease
 } = require('./version-checker');
 
-function createRequest({ statusCode = 200, body = '{}', error = null }) {
+function createRequest({ statusCode = 302, location = '', error = null }) {
   return (url, options, callback) => {
     const req = new EventEmitter();
     req.setTimeout = () => req;
@@ -23,9 +23,9 @@ function createRequest({ statusCode = 200, body = '{}', error = null }) {
 
       const res = new EventEmitter();
       res.statusCode = statusCode;
+      res.headers = { location };
+      res.resume = () => {};
       callback(res);
-      res.emit('data', Buffer.from(body));
-      res.emit('end');
     });
 
     return req;
@@ -42,7 +42,7 @@ test('normalizes release tags and compares semantic versions', () => {
 test('requests the latest official GitHub release', async () => {
   const release = await requestLatestRelease({
     request: createRequest({
-      body: JSON.stringify({ tag_name: 'v1.1.0', draft: false, prerelease: false })
+      location: 'https://github.com/debbide/ProxyBridge/releases/tag/v1.1.0'
     })
   });
 
@@ -52,12 +52,7 @@ test('requests the latest official GitHub release', async () => {
 test('reports an available update', async () => {
   const result = await checkVersion({
     request: createRequest({
-      body: JSON.stringify({
-        tag_name: 'v1.1.0',
-        draft: false,
-        prerelease: false,
-        html_url: 'https://github.com/debbide/ProxyBridge/releases/tag/v1.1.0'
-      })
+      location: 'https://github.com/debbide/ProxyBridge/releases/tag/v1.1.0'
     })
   });
 
@@ -70,7 +65,7 @@ test('reports an available update', async () => {
 test('reports when the installed version is current', async () => {
   const result = await checkVersion({
     request: createRequest({
-      body: JSON.stringify({ tag_name: 'v1.0.0', draft: false, prerelease: false })
+      location: 'https://github.com/debbide/ProxyBridge/releases/tag/v1.0.0'
     })
   });
 

@@ -157,6 +157,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=600
 ExecStart=${INSTALL_DIR}/update.sh
 EOF
 }

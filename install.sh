@@ -289,6 +289,7 @@ update_proxybridge() {
   trap rollback_update ERR
 
   copy_release_files
+  systemctl restart "${SERVICE_NAME}" || true
 
   trap - ERR
   rm -rf "${BACKUP_DIR}"

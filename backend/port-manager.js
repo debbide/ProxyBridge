@@ -1,5 +1,7 @@
 const net = require('node:net');
 const { request } = require('node:http');
+const https = require('node:https');
+const tls = require('node:tls');
 const ProxyChain = require('proxy-chain');
 
 function checkPortAvailable(host, port) {
@@ -153,6 +155,10 @@ class PortManager {
       } catch (error) {
         // Plain-text IP services are supported as well as JSON responses.
       }
+      ip = String(ip).trim();
+      if (!net.isIP(ip)) {
+        throw new Error('测速服务未返回有效 IP 地址');
+      }
       return { ip, latency: Date.now() - startedAt };
     } finally {
       await server.close(true).catch(() => undefined);
@@ -172,32 +178,74 @@ class PortManager {
 
   requestThroughLocalProxy(port, targetUrl, timeoutMs) {
     const target = new URL(targetUrl);
-    if (target.protocol !== 'http:') {
-      throw new Error('当前测速地址必须使用 HTTP 协议');
+    if (target.protocol !== 'https:') {
+      throw new Error('当前测速地址必须使用 HTTPS 协议');
     }
 
     return new Promise((resolve, reject) => {
-      const req = request({
+      let settled = false;
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+
+      const connectRequest = request({
         host: this.host,
         port,
-        method: 'GET',
-        path: target.href,
-        headers: { Host: target.host }
-      }, (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          const body = Buffer.concat(chunks).toString('utf8');
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            reject(new Error(`测速服务返回 HTTP ${res.statusCode}`));
-            return;
-          }
-          resolve(body);
+        method: 'CONNECT',
+        path: `${target.hostname}:${target.port || 443}`,
+        headers: { Host: `${target.hostname}:${target.port || 443}` }
+      });
+
+      connectRequest.setTimeout(timeoutMs, () => connectRequest.destroy(new Error('代理 CONNECT 超时')));
+      connectRequest.once('error', fail);
+      connectRequest.once('connect', (response, socket, head) => {
+        if (response.statusCode !== 200) {
+          socket.destroy();
+          fail(new Error(`代理 CONNECT 失败，HTTP ${response.statusCode}`));
+          return;
+        }
+        if (head.length) socket.unshift(head);
+
+        const secureSocket = tls.connect({
+          socket,
+          servername: target.hostname
+        });
+        secureSocket.setTimeout(timeoutMs, () => secureSocket.destroy(new Error('代理 TLS 超时')));
+        secureSocket.once('error', fail);
+        secureSocket.once('secureConnect', () => {
+          const targetRequest = https.request({
+            protocol: 'https:',
+            hostname: target.hostname,
+            port: target.port || 443,
+            path: `${target.pathname}${target.search}`,
+            method: 'GET',
+            headers: {
+              Host: target.host,
+              Accept: 'application/json, text/plain'
+            },
+            agent: false,
+            createConnection: () => secureSocket
+          }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+              if (settled) return;
+              if (res.statusCode < 200 || res.statusCode >= 300) {
+                fail(new Error(`测速服务返回 HTTP ${res.statusCode}`));
+                return;
+              }
+              settled = true;
+              resolve(Buffer.concat(chunks).toString('utf8'));
+            });
+          });
+          targetRequest.setTimeout(timeoutMs, () => targetRequest.destroy(new Error('代理测速超时')));
+          targetRequest.once('error', fail);
+          targetRequest.end();
         });
       });
-      req.setTimeout(timeoutMs, () => req.destroy(new Error('代理测速超时')));
-      req.once('error', reject);
-      req.end();
+      connectRequest.end();
     });
   }
 }

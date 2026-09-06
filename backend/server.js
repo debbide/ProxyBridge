@@ -134,7 +134,7 @@ function createApplication(options = {}) {
       }
       const result = await portManager.testProxy(
         uri,
-        process.env.IP_CHECK_URL || 'http://api.ipify.org?format=json',
+        process.env.IP_CHECK_URL || 'https://api.ipify.org?format=json',
         Number(process.env.PROXY_TEST_TIMEOUT_MS || 15000)
       );
       return res.json(result);

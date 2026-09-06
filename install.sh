@@ -5,6 +5,16 @@ set -Eeuo pipefail
 SERVICE_NAME="proxybridge"
 INSTALL_DIR="/opt/proxybridge"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+REPOSITORY_ARCHIVE="https://github.com/debbide/ProxyBridge/archive/refs/heads/master.tar.gz"
+SOURCE_TEMP_DIR=""
+
+cleanup() {
+  if [[ -n "${SOURCE_TEMP_DIR}" && -d "${SOURCE_TEMP_DIR}" ]]; then
+    rm -rf "${SOURCE_TEMP_DIR}"
+  fi
+}
+
+trap cleanup EXIT
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "请使用 root 权限运行：sudo bash install.sh"
@@ -16,11 +26,33 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE-$0}")" && pwd)"
 if [[ ! -f "${SCRIPT_DIR}/backend/package.json" || ! -f "${SCRIPT_DIR}/backend/server.js" ]]; then
-  echo "错误：请在 ProxyBridge 项目根目录运行此脚本。"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "错误：curl 管道安装需要系统预先安装 curl。"
+    exit 1
+  fi
+  if ! command -v tar >/dev/null 2>&1; then
+    echo "错误：未找到 tar，无法解压项目文件。"
+    exit 1
+  fi
+
+  echo "正在下载 ProxyBridge 最新版本..."
+  SOURCE_TEMP_DIR="$(mktemp -d)"
+  curl -fsSL "${REPOSITORY_ARCHIVE}" | tar -xz -C "${SOURCE_TEMP_DIR}" --strip-components=1
+  SCRIPT_DIR="${SOURCE_TEMP_DIR}"
+
+  if [[ ! -f "${SCRIPT_DIR}/backend/package.json" || ! -f "${SCRIPT_DIR}/backend/server.js" ]]; then
+    echo "错误：下载的项目文件不完整。"
+    exit 1
+  fi
+fi
+
+if [[ ! -r /dev/tty ]]; then
+  echo "错误：交互式安装需要可用的终端。"
   exit 1
 fi
+exec 3</dev/tty
 
 echo "========================================"
 echo "        ProxyBridge 一键安装程序"
@@ -31,7 +63,7 @@ echo "请选择 Web 管理面板的监听地址："
 echo "  1) 127.0.0.1  仅本机访问（推荐）"
 echo "  2) 0.0.0.0    允许局域网或公网访问"
 while true; do
-  read -r -p "请输入选项 " LISTEN_CHOICE
+  read -r -u 3 -p "请输入选项 " LISTEN_CHOICE
   LISTEN_CHOICE="${LISTEN_CHOICE:-1}"
   case "${LISTEN_CHOICE}" in
     1) HOST="127.0.0.1"; break ;;
@@ -41,7 +73,7 @@ while true; do
 done
 
 while true; do
-  read -r -p "管理面板端口 " PORT
+  read -r -u 3 -p "管理面板端口 " PORT
   PORT="${PORT:-3000}"
   if [[ "${PORT}" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )); then
     break
@@ -50,13 +82,13 @@ while true; do
 done
 
 while true; do
-  read -r -s -p "请设置管理密码（至少 8 个字符）: " ADMIN_PASSWORD
+  read -r -s -u 3 -p "请设置管理密码（至少 8 个字符）: " ADMIN_PASSWORD
   echo
   if (( ${#ADMIN_PASSWORD} < 8 )); then
     echo "密码长度不能少于 8 个字符。"
     continue
   fi
-  read -r -s -p "请再次输入管理密码: " ADMIN_PASSWORD_CONFIRM
+  read -r -s -u 3 -p "请再次输入管理密码: " ADMIN_PASSWORD_CONFIRM
   echo
   if [[ "${ADMIN_PASSWORD}" == "${ADMIN_PASSWORD_CONFIRM}" ]]; then
     break

@@ -122,6 +122,10 @@ copy_release_files() {
   cp -a "${TEMP_DIR}/frontend/." "${INSTALL_DIR}/frontend/"
 }
 
+write_installed_version() {
+  (cd "${INSTALL_DIR}/backend" && npm pkg set "version=${RELEASE_VERSION}")
+}
+
 write_service() {
   cat > "${SERVICE_FILE}" <<EOF
 [Unit]
@@ -155,6 +159,7 @@ install_proxybridge() {
     download_latest_release
     ensure_runtime
     copy_release_files
+    write_installed_version
     (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
     write_service
     systemctl daemon-reload
@@ -218,6 +223,7 @@ install_proxybridge() {
 
   echo "正在安装 ProxyBridge v${RELEASE_VERSION}..."
   copy_release_files
+  write_installed_version
   mkdir -p "${INSTALL_DIR}/backend/data"
   cat > "${INSTALL_DIR}/backend/.env" <<EOF
 HOST=${host}
@@ -270,6 +276,7 @@ update_proxybridge() {
   echo "正在停止服务并更新文件..."
   systemctl stop "${SERVICE_NAME}"
   copy_release_files
+  write_installed_version
 
   echo "正在安装生产依赖..."
   (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)

@@ -5,8 +5,46 @@ set -Eeuo pipefail
 SERVICE_NAME="proxybridge"
 INSTALL_DIR="/opt/proxybridge"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-REPOSITORY_ARCHIVE="https://github.com/debbide/ProxyBridge/archive/refs/heads/master.tar.gz"
+RELEASE_API_URL="https://api.github.com/repos/debbide/ProxyBridge/releases/latest"
 SOURCE_TEMP_DIR=""
+
+usage() {
+  cat <<EOF
+用法：
+  sudo bash install.sh              安装 ProxyBridge
+  sudo bash install.sh --uninstall  卸载程序，保留配置和代理数据
+  sudo bash install.sh --purge      彻底卸载程序、配置和代理数据
+EOF
+}
+
+uninstall_proxybridge() {
+  local purge_data="${1}"
+
+  echo "正在停止并移除 ${SERVICE_NAME} 服务..."
+  systemctl disable --now "${SERVICE_NAME}" >/dev/null 2>&1 || true
+  rm -f "${SERVICE_FILE}"
+  systemctl daemon-reload
+  systemctl reset-failed "${SERVICE_NAME}" >/dev/null 2>&1 || true
+
+  if [[ "${purge_data}" == "true" ]]; then
+    rm -rf "${INSTALL_DIR}"
+    echo "ProxyBridge 已彻底卸载，配置和代理数据已删除。"
+    return
+  fi
+
+  if [[ -d "${INSTALL_DIR}" ]]; then
+    find "${INSTALL_DIR}" -mindepth 1 -maxdepth 1 \
+      ! -name backend -exec rm -rf {} +
+    if [[ -d "${INSTALL_DIR}/backend" ]]; then
+      find "${INSTALL_DIR}/backend" -mindepth 1 -maxdepth 1 \
+        ! -name data ! -name .env -exec rm -rf {} +
+    fi
+  fi
+
+  echo "ProxyBridge 程序已卸载。"
+  echo "配置和代理数据保留在 ${INSTALL_DIR}/backend/.env 和 ${INSTALL_DIR}/backend/data。"
+  echo "再次安装时会继续使用这些数据。"
+}
 
 cleanup() {
   if [[ -n "${SOURCE_TEMP_DIR}" && -d "${SOURCE_TEMP_DIR}" ]]; then
@@ -26,6 +64,37 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
+case "${1:-}" in
+  --uninstall)
+    uninstall_proxybridge false
+    exit 0
+    ;;
+  --purge)
+    if [[ ! -r /dev/tty ]]; then
+      echo "错误：彻底卸载需要可用的交互终端。"
+      exit 1
+    fi
+    read -r -p "此操作将永久删除所有配置和代理数据，输入 DELETE 继续: " PURGE_CONFIRM </dev/tty
+    if [[ "${PURGE_CONFIRM}" != "DELETE" ]]; then
+      echo "已取消彻底卸载。"
+      exit 0
+    fi
+    uninstall_proxybridge true
+    exit 0
+    ;;
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "错误：未知参数 ${1}"
+    usage
+    exit 1
+    ;;
+esac
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE-$0}")" && pwd)"
 if [[ ! -f "${SCRIPT_DIR}/backend/package.json" || ! -f "${SCRIPT_DIR}/backend/server.js" ]]; then
   if ! command -v curl >/dev/null 2>&1; then
@@ -37,9 +106,26 @@ if [[ ! -f "${SCRIPT_DIR}/backend/package.json" || ! -f "${SCRIPT_DIR}/backend/s
     exit 1
   fi
 
-  echo "正在下载 ProxyBridge 最新版本..."
+  echo "正在查询 ProxyBridge 最新正式版本..."
+  RELEASE_METADATA="$(curl -fsSL --connect-timeout 10 --max-time 30 \
+    -H "Accept: application/vnd.github+json" \
+    -H "User-Agent: ProxyBridge-Installer" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${RELEASE_API_URL}")" || {
+      echo "错误：无法从 GitHub 获取最新 Release 信息。"
+      exit 1
+    }
+  RELEASE_TAG="$(printf '%s' "${RELEASE_METADATA}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  if [[ -z "${RELEASE_TAG}" || ! "${RELEASE_TAG}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+    echo "错误：GitHub 仓库尚未发布有效的正式版本。"
+    exit 1
+  fi
+
+  RELEASE_ARCHIVE="https://github.com/debbide/ProxyBridge/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+  echo "即将安装 ProxyBridge ${RELEASE_TAG}"
   SOURCE_TEMP_DIR="$(mktemp -d)"
-  curl -fsSL "${REPOSITORY_ARCHIVE}" | tar -xz -C "${SOURCE_TEMP_DIR}" --strip-components=1
+  curl -fsSL --connect-timeout 10 --max-time 120 "${RELEASE_ARCHIVE}" \
+    | tar -xz -C "${SOURCE_TEMP_DIR}" --strip-components=1
   SCRIPT_DIR="${SOURCE_TEMP_DIR}"
 
   if [[ ! -f "${SCRIPT_DIR}/backend/package.json" || ! -f "${SCRIPT_DIR}/backend/server.js" ]]; then
@@ -47,6 +133,13 @@ if [[ ! -f "${SCRIPT_DIR}/backend/package.json" || ! -f "${SCRIPT_DIR}/backend/s
     exit 1
   fi
 fi
+
+INSTALL_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/backend/package.json" | head -n 1)"
+if [[ -z "${INSTALL_VERSION}" ]]; then
+  echo "错误：无法读取待安装版本号。"
+  exit 1
+fi
+echo "待安装版本：v${INSTALL_VERSION}"
 
 if [[ ! -r /dev/tty ]]; then
   echo "错误：交互式安装需要可用的终端。"
@@ -210,6 +303,7 @@ fi
 echo
 echo "========================================"
 echo "ProxyBridge 安装成功"
+echo "安装版本：v${INSTALL_VERSION}"
 echo "管理地址：http://${HOST}:${PORT}/"
 if [[ "${HOST}" == "0.0.0.0" ]]; then
   echo "远程访问时请将 0.0.0.0 替换为服务器 IP 地址。"

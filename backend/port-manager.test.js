@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const test = require('node:test');
 
-const { PortManager } = require('./port-manager');
+const { PortManager, createTunnelAgent } = require('./port-manager');
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -16,6 +16,14 @@ function close(server) {
     server.close((error) => error ? reject(error) : resolve());
   });
 }
+
+test('binds the HTTPS request to the established proxy tunnel socket', () => {
+  const secureSocket = {};
+  const agent = createTunnelAgent(secureSocket);
+
+  assert.equal(agent.createConnection(), secureSocket);
+  agent.destroy();
+});
 
 test('requires an HTTPS target for proxy testing', async () => {
   const manager = new PortManager({ database: {} });

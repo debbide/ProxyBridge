@@ -4,6 +4,12 @@ const https = require('node:https');
 const tls = require('node:tls');
 const ProxyChain = require('proxy-chain');
 
+function createTunnelAgent(secureSocket) {
+  const agent = new https.Agent({ keepAlive: false });
+  agent.createConnection = () => secureSocket;
+  return agent;
+}
+
 function checkPortAvailable(host, port) {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -215,6 +221,7 @@ class PortManager {
         secureSocket.setTimeout(timeoutMs, () => secureSocket.destroy(new Error('代理 TLS 超时')));
         secureSocket.once('error', fail);
         secureSocket.once('secureConnect', () => {
+          const tunnelAgent = createTunnelAgent(secureSocket);
           const targetRequest = https.request({
             protocol: 'https:',
             hostname: target.hostname,
@@ -225,8 +232,7 @@ class PortManager {
               Host: target.host,
               Accept: 'application/json, text/plain'
             },
-            agent: false,
-            createConnection: () => secureSocket
+            agent: tunnelAgent
           }, (res) => {
             const chunks = [];
             res.on('data', (chunk) => chunks.push(chunk));
@@ -250,4 +256,4 @@ class PortManager {
   }
 }
 
-module.exports = { PortManager, parseProxyUri, sanitizeProxy, checkPortAvailable };
+module.exports = { PortManager, parseProxyUri, sanitizeProxy, checkPortAvailable, createTunnelAgent };

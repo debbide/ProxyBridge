@@ -250,18 +250,6 @@ EOF
   echo "管理地址：http://${host}:${port}/"
 }
 
-rollback_update() {
-  echo "更新失败，正在恢复更新前版本..."
-  trap - ERR
-  if [[ -z "${BACKUP_DIR}" || ! -d "${BACKUP_DIR}" ]]; then
-    echo "错误：更新失败，但尚未创建备份；现有安装未被替换。"
-    return 1
-  fi
-  rm -rf "${INSTALL_DIR}"
-  mv "${BACKUP_DIR}" "${INSTALL_DIR}"
-  BACKUP_DIR=""
-}
-
 update_proxybridge() {
   if [[ ! -f "${INSTALL_DIR}/backend/.env" || ! -d "${INSTALL_DIR}/backend/data" ]]; then
     echo "未找到现有安装，请先选择安装。"
@@ -282,18 +270,13 @@ update_proxybridge() {
 
   echo "正在安装生产依赖..."
   (cd "${TEMP_DIR}/backend" && npm ci --omit=dev)
-  BACKUP_DIR="${INSTALL_DIR}.backup.$(date +%Y%m%d%H%M%S)"
 
-  echo "正在备份当前版本..."
-  cp -a "${INSTALL_DIR}" "${BACKUP_DIR}"
-  trap rollback_update ERR
-
+  echo "正在停止服务并更新文件..."
+  systemctl stop "${SERVICE_NAME}"
   copy_release_files
-  systemctl restart "${SERVICE_NAME}" || true
-
-  trap - ERR
-  rm -rf "${BACKUP_DIR}"
-  BACKUP_DIR=""
+  write_service
+  systemctl daemon-reload
+  systemctl start "${SERVICE_NAME}"
   echo "ProxyBridge 已更新到 v${RELEASE_VERSION}。"
 }
 

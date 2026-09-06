@@ -154,7 +154,28 @@ install_proxybridge() {
   local host port admin_password admin_password_confirm jwt_secret encryption_key
 
   if [[ -f "${INSTALL_DIR}/backend/.env" ]]; then
-    echo "检测到已有安装，请从主菜单选择更新。"
+    if [[ -f "${INSTALL_DIR}/backend/server.js" && -e "${SERVICE_FILE}" ]]; then
+      echo "检测到已有安装，请从主菜单选择更新。"
+      return
+    fi
+
+    echo "检测到保留的配置和代理数据，将恢复安装并继续使用原有数据。"
+    download_latest_release
+    ensure_runtime
+    copy_release_files
+    (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
+    write_service
+    systemctl daemon-reload
+    systemctl enable --now "${SERVICE_NAME}"
+    sleep 2
+
+    if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+      echo "恢复安装完成，但服务启动失败。"
+      journalctl -u "${SERVICE_NAME}" -n 30 --no-pager
+      exit 1
+    fi
+
+    echo "ProxyBridge v${RELEASE_VERSION} 已恢复安装，原配置和代理数据保持不变。"
     return
   fi
 
@@ -314,11 +335,6 @@ uninstall_proxybridge() {
       echo "程序已卸载，配置和代理数据保留在 ${INSTALL_DIR}/backend。"
       ;;
     2)
-      read -r -u 3 -p "此操作不可恢复，输入 DELETE 继续: " purge_confirm
-      if [[ "${purge_confirm}" != "DELETE" ]]; then
-        echo "已取消彻底卸载。"
-        return
-      fi
       systemctl disable --now "${SERVICE_NAME}" >/dev/null 2>&1 || true
       rm -f "${SERVICE_FILE}"
       systemctl daemon-reload

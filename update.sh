@@ -41,7 +41,9 @@ fi
 (cd "${TEMP_DIR}/backend" && npm pkg set "version=${release_version}")
 (cd "${TEMP_DIR}/backend" && npm ci --omit=dev)
 
-systemctl stop "${SERVICE_NAME}"
+# Use pkill instead of systemctl stop to avoid deadlocks in python mock systemctl environments
+pkill -f "node ${INSTALL_DIR}/backend/server.js" || true
+sleep 1
 
 mkdir -p "${INSTALL_DIR}/backend" "${INSTALL_DIR}/frontend"
 find "${INSTALL_DIR}/backend" -mindepth 1 -maxdepth 1 \

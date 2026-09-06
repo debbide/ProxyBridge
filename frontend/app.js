@@ -127,6 +127,7 @@ createApp({
           return;
         }
         this.updateTargetVersion = result.targetVersion;
+        this.updateOldVersion = this.versionInfo?.currentVersion;
         this.updatePollStartedAt = Date.now();
         this.notify(`正在更新到 v${result.targetVersion}，服务将短暂重启`, 'info');
         this.scheduleUpdatePoll();
@@ -152,6 +153,7 @@ createApp({
       if (Date.now() - this.updatePollStartedAt > 120000) {
         this.stopUpdatePolling();
         this.updateTargetVersion = null;
+        this.updateOldVersion = null;
         this.notify('更新等待超时，请稍后重新检查版本', 'error');
         return;
       }
@@ -164,10 +166,11 @@ createApp({
         if (response.ok) {
           const version = await response.json();
           this.versionInfo = version;
-          if (version.currentVersion === targetVersion) {
+          if (version.currentVersion && version.currentVersion !== this.updateOldVersion) {
             this.stopUpdatePolling();
             this.updateTargetVersion = null;
-            this.notify(`已更新到 v${targetVersion}`, 'success');
+            this.updateOldVersion = null;
+            this.notify(`已更新到 v${version.currentVersion}`, 'success');
             return;
           }
         }

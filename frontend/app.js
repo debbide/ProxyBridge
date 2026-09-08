@@ -3,6 +3,7 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
+      proxyHost: window.location.hostname,
       token: localStorage.getItem('proxy-manager-token') || '',
       password: '',
       proxies: [],

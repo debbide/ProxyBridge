@@ -106,7 +106,7 @@
                   <button class="icon-button" type="button" @click="cancelEditName" :disabled="savingName[proxy.id]" aria-label="取消编辑" title="取消编辑"><svg viewBox="0 0 24 24"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5Z"/></svg></button>
                 </form>
               </div>
-              <div class="node-endpoint"><small>本地入口</small><strong>127.0.0.1:{{ proxy.local_port }}</strong></div>
+              <div class="node-endpoint"><small>代理入口</small><strong>{{ proxyHost }}:{{ proxy.local_port }}</strong></div>
               <div class="node-test"><template v-if="results[proxy.id]"><strong>{{ results[proxy.id].ip }}</strong><span>{{ results[proxy.id].latency }} ms</span></template><span v-else class="muted-result">尚未测速</span></div>
               <span class="status" :class="proxy.is_running ? 'status-online' : 'status-offline'"><i></i>{{ proxy.is_running ? '运行中' : '已停止' }}</span>
               <div class="node-actions">

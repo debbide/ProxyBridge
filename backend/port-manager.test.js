@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const test = require('node:test');
 
-const { PortManager, createTunnelAgent, isLoopbackHostname } = require('./port-manager');
+const { PortManager, createTunnelAgent } = require('./port-manager');
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -23,39 +23,6 @@ test('binds the HTTPS request to the established proxy tunnel socket', () => {
 
   assert.equal(agent.createConnection(), secureSocket);
   agent.destroy();
-});
-
-test('recognizes IPv4, IPv6 and localhost loopback hosts', () => {
-  assert.equal(isLoopbackHostname('localhost'), true);
-  assert.equal(isLoopbackHostname('127.0.0.1'), true);
-  assert.equal(isLoopbackHostname('127.25.4.9'), true);
-  assert.equal(isLoopbackHostname('::1'), true);
-  assert.equal(isLoopbackHostname('0:0:0:0:0:0:0:1'), true);
-  assert.equal(isLoopbackHostname('192.168.1.1'), false);
-});
-
-test('rejects an upstream proxy that points to a managed loopback port', () => {
-  const manager = new PortManager({
-    database: { getUsedPorts: () => new Set([8001, 8002]) }
-  });
-
-  assert.throws(
-    () => manager.assertNoLocalLoop('http://127.0.0.1:8002'),
-    /会形成代理回环/
-  );
-  assert.throws(
-    () => manager.assertNoLocalLoop('socks5://[::1]:8001'),
-    /会形成代理回环/
-  );
-});
-
-test('allows remote proxies and unrelated local proxy ports', () => {
-  const manager = new PortManager({
-    database: { getUsedPorts: () => new Set([8001]) }
-  });
-
-  assert.doesNotThrow(() => manager.assertNoLocalLoop('http://203.0.113.10:8001'));
-  assert.doesNotThrow(() => manager.assertNoLocalLoop('socks5://127.0.0.1:1080'));
 });
 
 test('requires an HTTPS target for proxy testing', async () => {

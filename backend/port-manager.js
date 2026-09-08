@@ -53,6 +53,22 @@ function sanitizeProxy(proxy) {
   };
 }
 
+function isLoopbackHostname(hostname) {
+  const normalizedHostname = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (normalizedHostname === 'localhost' || normalizedHostname === '::1') {
+    return true;
+  }
+
+  const addressType = net.isIP(normalizedHostname);
+  if (addressType === 4) {
+    return normalizedHostname.split('.')[0] === '127';
+  }
+  if (addressType === 6) {
+    return normalizedHostname === '0:0:0:0:0:0:0:1';
+  }
+  return false;
+}
+
 class PortManager {
   constructor({ database, host = '127.0.0.1', portStart = 8001, portEnd = 8999 }) {
     this.database = database;
@@ -84,12 +100,24 @@ class PortManager {
     throw new Error('没有可分配的本地端口');
   }
 
+  assertNoLocalLoop(uri) {
+    const parsed = parseProxyUri(uri);
+    if (!isLoopbackHostname(parsed.hostname)) {
+      return;
+    }
+
+    const upstreamPort = Number(parsed.port);
+    if (this.database.getUsedPorts().has(upstreamPort)) {
+      throw new Error(`上游代理指向本机托管端口 ${upstreamPort}，会形成代理回环`);
+    }
+  }
+
   async start(proxy) {
     return this.serialize(proxy.id, async () => {
       if (this.servers.has(proxy.id)) {
         return this.database.setRunning(proxy.id, true);
       }
-      parseProxyUri(proxy.uri);
+      this.assertNoLocalLoop(proxy.uri);
       if (!await checkPortAvailable(this.host, proxy.local_port)) {
         throw new Error(`本地端口 ${proxy.local_port} 已被占用`);
       }
@@ -142,7 +170,7 @@ class PortManager {
   }
 
   async testProxy(uri, targetUrl, timeoutMs = 15000) {
-    parseProxyUri(uri);
+    this.assertNoLocalLoop(uri);
     const port = await this.findTemporaryPort();
     const server = new ProxyChain.Server({
       host: this.host,
@@ -256,4 +284,11 @@ class PortManager {
   }
 }
 
-module.exports = { PortManager, parseProxyUri, sanitizeProxy, checkPortAvailable, createTunnelAgent };
+module.exports = {
+  PortManager,
+  parseProxyUri,
+  sanitizeProxy,
+  checkPortAvailable,
+  createTunnelAgent,
+  isLoopbackHostname
+};

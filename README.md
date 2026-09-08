@@ -14,6 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/debbide/ProxyBridge/master/install.
 
 程序默认安装到 `/opt/proxybridge`，创建并启动 `proxybridge.service`。代理节点端口默认仅监听 `127.0.0.1`。
 
+为避免代理请求在本机无限循环，系统会拒绝将上游代理配置为 `localhost`、`127.0.0.0/8` 或 IPv6 回环地址上的已托管端口。其他本地代理端口仍可正常作为上游使用。
+
 ## 服务管理
 
 ```bash

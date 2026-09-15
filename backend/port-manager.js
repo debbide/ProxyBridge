@@ -4,6 +4,7 @@ const https = require('node:https');
 const tls = require('node:tls');
 const ProxyChain = require('proxy-chain');
 const { isPortConflict } = require('./database');
+const { badRequest } = require('./http-error');
 
 function createTunnelAgent(secureSocket) {
   const agent = new https.Agent({ keepAlive: false });
@@ -70,6 +71,25 @@ function normalizeNodeName(value, { maxLength = 80 } = {}) {
   return collapsed;
 }
 
+// A node whose upstream points at one of our own managed ports would forward
+// into itself and spin at full CPU until the request times out. Remote hosts
+// and unrelated local ports (say a separate local proxy on 1080) stay allowed.
+function assertNotSelfReferential(uri, managedPorts) {
+  const parsed = parseProxyUri(uri);
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const isLocal = hostname === 'localhost' || hostname === '::1'
+    || (net.isIP(hostname) === 4 && hostname.split('.')[0] === '127')
+    || (net.isIP(hostname) === 6 && hostname === '0:0:0:0:0:0:0:1');
+  if (!isLocal) {
+    return;
+  }
+
+  const upstreamPort = Number(parsed.port);
+  if (managedPorts.has(upstreamPort)) {
+    throw badRequest(`上游代理指向本机托管端口 ${upstreamPort}，会形成代理回环`);
+  }
+}
+
 class PortManager {
   constructor({ database, host = '127.0.0.1', portStart = 8001, portEnd = 8999 }) {
     this.database = database;
@@ -123,6 +143,7 @@ class PortManager {
         return this.database.setRunning(proxy.id, true);
       }
       parseProxyUri(proxy.uri);
+      assertNotSelfReferential(proxy.uri, this.database.getUsedPorts());
       if (!await checkPortAvailable(this.host, proxy.local_port)) {
         throw new Error(`本地端口 ${proxy.local_port} 已被占用`);
       }
@@ -294,6 +315,7 @@ module.exports = {
   parseProxyUri,
   sanitizeProxy,
   normalizeNodeName,
+  assertNotSelfReferential,
   checkPortAvailable,
   createTunnelAgent
 };

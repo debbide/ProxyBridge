@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const test = require('node:test');
 
-const { PortManager, createTunnelAgent } = require('./port-manager');
+const { PortManager, createTunnelAgent, assertNotSelfReferential } = require('./port-manager');
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -23,6 +23,22 @@ test('binds the HTTPS request to the established proxy tunnel socket', () => {
 
   assert.equal(agent.createConnection(), secureSocket);
   agent.destroy();
+});
+
+test('rejects an upstream that points at a managed port, which would loop', () => {
+  const managed = new Set([8001, 8002]);
+
+  assert.throws(() => assertNotSelfReferential('http://127.0.0.1:8001', managed), /会形成代理回环/);
+  assert.throws(() => assertNotSelfReferential('http://localhost:8002', managed), /会形成代理回环/);
+  assert.throws(() => assertNotSelfReferential('socks5://[::1]:8001', managed), /会形成代理回环/);
+});
+
+test('allows remote upstreams and unrelated local proxy ports', () => {
+  const managed = new Set([8001]);
+
+  assert.doesNotThrow(() => assertNotSelfReferential('http://203.0.113.10:8001', managed));
+  assert.doesNotThrow(() => assertNotSelfReferential('socks5://127.0.0.1:1080', managed));
+  assert.doesNotThrow(() => assertNotSelfReferential('http://example.com:443', managed));
 });
 
 test('requires an HTTPS target for proxy testing', async () => {

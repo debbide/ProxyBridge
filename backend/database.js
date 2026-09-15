@@ -1,6 +1,16 @@
+'use strict';
+
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+
+const ENCRYPTED_PREFIX = 'enc:v1:';
+
+function isPortConflict(error) {
+  return Boolean(error)
+    && String(error.code || '').startsWith('SQLITE_CONSTRAINT')
+    && /local_port/i.test(String(error.message || ''));
+}
 
 class ProxyDatabase {
   constructor(databasePath, proxyCrypto) {
@@ -9,6 +19,7 @@ class ProxyDatabase {
     this.db = new Database(resolvedPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
+    this.db.pragma('busy_timeout = 5000');
     this.proxyCrypto = proxyCrypto;
     this.initialize();
     this.migrateProxyUris();
@@ -25,6 +36,17 @@ class ProxyDatabase {
       }
     });
     migrate();
+  }
+
+  // Fails loudly when the encryption key no longer matches the stored data,
+  // instead of letting every later request fail with an opaque crypto error.
+  verifyEncryptionKey() {
+    if (!this.proxyCrypto) return;
+    const encrypted = this.db.prepare(
+      `SELECT id FROM proxies WHERE uri LIKE '${ENCRYPTED_PREFIX}%' LIMIT 1`
+    ).get();
+    if (!encrypted) return;
+    this.getProxy(encrypted.id);
   }
 
   hydrateProxy(proxy) {
@@ -61,6 +83,12 @@ class ProxyDatabase {
     return new Set(this.db.prepare('SELECT local_port FROM proxies').all().map((row) => row.local_port));
   }
 
+  getPortConflicts() {
+    return this.db.prepare(
+      'SELECT local_port, COUNT(*) AS count FROM proxies GROUP BY local_port HAVING count > 1'
+    ).all();
+  }
+
   createProxy({ name, uri, localPort }) {
     const result = this.db.prepare(
       'INSERT INTO proxies (name, uri, local_port, is_running) VALUES (?, ?, ?, 0)'
@@ -87,4 +115,4 @@ class ProxyDatabase {
   }
 }
 
-module.exports = { ProxyDatabase };
+module.exports = { ProxyDatabase, isPortConflict };

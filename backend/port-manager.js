@@ -3,6 +3,7 @@ const { request } = require('node:http');
 const https = require('node:https');
 const tls = require('node:tls');
 const ProxyChain = require('proxy-chain');
+const { isPortConflict } = require('./database');
 
 function createTunnelAgent(secureSocket) {
   const agent = new https.Agent({ keepAlive: false });
@@ -53,6 +54,22 @@ function sanitizeProxy(proxy) {
   };
 }
 
+// Strips control characters (including newlines) so a name can never break the
+// panel layout or smuggle escape sequences into logs.
+function normalizeNodeName(value, { maxLength = 80 } = {}) {
+  const collapsed = String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!collapsed) {
+    throw new Error('节点名称不能为空');
+  }
+  if (collapsed.length > maxLength) {
+    throw new Error(`节点名称不能超过 ${maxLength} 个字符`);
+  }
+  return collapsed;
+}
+
 class PortManager {
   constructor({ database, host = '127.0.0.1', portStart = 8001, portEnd = 8999 }) {
     this.database = database;
@@ -74,10 +91,26 @@ class PortManager {
     });
   }
 
-  async allocatePort() {
-    const usedPorts = this.database.getUsedPorts();
+  // Claims a port with a real INSERT so the UNIQUE constraint, not a racy
+  // pre-check, is what guarantees exclusivity. Concurrent callers that lose the
+  // race simply move on to the next candidate port.
+  async reservePort({ name, uri }) {
     for (let port = this.portStart; port <= this.portEnd; port += 1) {
-      if (!usedPorts.has(port) && await checkPortAvailable(this.host, port)) {
+      if (this.database.getUsedPorts().has(port)) continue;
+      if (!await checkPortAvailable(this.host, port)) continue;
+      try {
+        return this.database.createProxy({ name, uri, localPort: port });
+      } catch (error) {
+        if (isPortConflict(error)) continue;
+        throw error;
+      }
+    }
+    return null;
+  }
+
+  async allocatePort() {
+    for (let port = this.portStart; port <= this.portEnd; port += 1) {
+      if (!this.database.getUsedPorts().has(port) && await checkPortAvailable(this.host, port)) {
         return port;
       }
     }
@@ -256,4 +289,11 @@ class PortManager {
   }
 }
 
-module.exports = { PortManager, parseProxyUri, sanitizeProxy, checkPortAvailable, createTunnelAgent };
+module.exports = {
+  PortManager,
+  parseProxyUri,
+  sanitizeProxy,
+  normalizeNodeName,
+  checkPortAvailable,
+  createTunnelAgent
+};

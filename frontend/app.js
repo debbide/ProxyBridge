@@ -25,6 +25,7 @@ createApp({
       updateConfirmOpen: false,
       updateLoading: false,
       updateTargetVersion: null,
+      updateOldVersion: null,
       updatePollTimer: null,
       updatePollStartedAt: 0,
       notices: []

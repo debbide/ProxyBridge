@@ -293,17 +293,68 @@ update_proxybridge() {
 
   echo "正在停止服务并更新文件..."
   systemctl stop "${SERVICE_NAME}"
-  copy_release_files
-  write_installed_version
 
-  echo "正在安装生产依赖..."
-  (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev)
+  # Snapshot what the update replaces so a failed start can be undone. data/ and
+  # .env are excluded on purpose: they are never overwritten by an update.
+  local backup_dir
+  backup_dir="$(mktemp -d)"
+  cp -a "${INSTALL_DIR}/backend" "${backup_dir}/backend"
+  cp -a "${INSTALL_DIR}/frontend" "${backup_dir}/frontend"
 
-  write_service
-  write_update_service
-  systemctl daemon-reload
-  systemctl enable --now "${SERVICE_NAME}"
-  echo "ProxyBridge 已更新到 v${RELEASE_VERSION}。"
+  rollback_update() {
+    echo "正在回滚到 v${current_version:-更新前版本}..."
+    rm -rf "${INSTALL_DIR}/backend" "${INSTALL_DIR}/frontend"
+    cp -a "${backup_dir}/backend" "${INSTALL_DIR}/backend"
+    cp -a "${backup_dir}/frontend" "${INSTALL_DIR}/frontend"
+    rm -rf "${backup_dir}"
+    systemctl daemon-reload
+    systemctl start "${SERVICE_NAME}" || true
+  }
+
+  # Past this point a failure would leave a half-replaced install, so every step
+  # is checked explicitly and falls through to the rollback below.
+  local deploy_failed=0
+  if ! copy_release_files || ! write_installed_version; then
+    echo "替换程序文件失败。"
+    deploy_failed=1
+  elif ! (cd "${INSTALL_DIR}/backend" && npm ci --omit=dev); then
+    echo "依赖安装失败。"
+    deploy_failed=1
+  fi
+
+  if (( deploy_failed == 0 )); then
+    write_service
+    write_update_service
+    systemctl daemon-reload
+    systemctl enable --now "${SERVICE_NAME}"
+
+    # Confirm the new release actually came up before declaring success.
+    local deadline=$((SECONDS + 30))
+    while (( SECONDS < deadline )); do
+      if systemctl is-active --quiet "${SERVICE_NAME}"; then
+        break
+      fi
+      sleep 1
+    done
+
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+      rm -rf "${backup_dir}"
+      echo "ProxyBridge 已更新到 v${RELEASE_VERSION}。"
+      return 0
+    fi
+
+    echo "新版本启动失败，正在收集日志..."
+    journalctl -u "${SERVICE_NAME}" -n 30 --no-pager || true
+  fi
+
+  rollback_update
+
+  if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    echo "v${RELEASE_VERSION} 更新失败，已回滚到 v${current_version:-更新前版本}。"
+  else
+    echo "v${RELEASE_VERSION} 更新失败，回滚后服务仍未恢复，请手动检查。"
+  fi
+  return 1
 }
 
 uninstall_proxybridge() {

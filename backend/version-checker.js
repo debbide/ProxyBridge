@@ -1,3 +1,5 @@
+'use strict';
+
 const https = require('node:https');
 const { version: currentVersion } = require('./package.json');
 
@@ -46,7 +48,7 @@ function requestLatestRelease({ request = https.get, timeoutMs = 8000 } = {}) {
   });
 }
 
-async function checkVersion(options = {}) {
+async function checkVersionUncached(options = {}) {
   const checkedAt = new Date().toISOString();
   try {
     const release = await requestLatestRelease(options);
@@ -81,4 +83,44 @@ async function checkVersion(options = {}) {
   }
 }
 
-module.exports = { checkVersion, compareVersions, normalizeVersion, requestLatestRelease };
+// The panel polls /api/version every couple of seconds while an update runs.
+// Caching keeps that from turning into a burst of GitHub requests, which is the
+// exact rate limiting the installer already works around. Concurrent callers
+// share a single in-flight request.
+function createVersionChecker({ ttlMs = 60000, check = checkVersionUncached } = {}) {
+  let cached = null;
+  let cachedAt = 0;
+  let inFlight = null;
+
+  return async function checkVersion(options = {}) {
+    if (cached && Date.now() - cachedAt < ttlMs) {
+      return cached;
+    }
+    if (inFlight) {
+      return inFlight;
+    }
+
+    inFlight = (async () => {
+      try {
+        const result = await check(options);
+        cached = result;
+        cachedAt = Date.now();
+        return result;
+      } finally {
+        inFlight = null;
+      }
+    })();
+
+    return inFlight;
+  };
+}
+
+module.exports = {
+  checkVersion: checkVersionUncached,
+  checkVersionUncached,
+  createVersionChecker,
+  compareVersions,
+  normalizeVersion,
+  requestLatestRelease,
+  LATEST_RELEASE_URL
+};

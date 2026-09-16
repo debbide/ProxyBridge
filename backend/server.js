@@ -12,6 +12,7 @@ const {
   sanitizeProxy,
   normalizeNodeName
 } = require('./port-manager');
+const { parseVlessLink, isVlessLink } = require('./vless/link');
 const { createProxyCrypto } = require('./proxy-crypto');
 const { createVersionChecker } = require('./version-checker');
 const { startUpdate } = require('./updater');
@@ -32,15 +33,19 @@ function validate(run) {
 
 function parseProxyInput(input, fallbackName = '') {
   const value = typeof input === 'string' ? input.trim() : '';
-  const match = value.match(/(?:^|\s)((?:https?|socks|socks5|socks5h):\/\/\S+)/i);
+  const match = value.match(/(?:^|\s)((?:https?|socks|socks5|socks5h|vless):\/\/\S+)/i);
   if (!match) {
-    throw new Error('请输入包含 http、https、socks、socks5 或 socks5h 协议的代理地址');
+    throw new Error('请输入包含 http、https、socks、socks5、socks5h 或 vless 协议的代理地址');
   }
 
   const uri = match[1].replace(/^socks:\/\//i, 'socks5://');
   parseProxyUri(uri);
+  // A vless:// link carries its own `#name` fragment, which is a better default
+  // than a random one; an explicitly typed name still wins.
   const suppliedName = value.replace(match[0], ' ').trim() || String(fallbackName || '').trim();
-  const generatedName = `节点-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  const generatedName = isVlessLink(uri)
+    ? (parseVlessLink(uri).name || `节点-${Math.random().toString(36).slice(2, 7).toUpperCase()}`)
+    : `节点-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
   return { name: normalizeNodeName(suppliedName || generatedName), uri };
 }
 

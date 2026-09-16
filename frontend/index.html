@@ -132,7 +132,7 @@
           <div class="field">
             <label for="proxy-input">代理地址或“名称 + 地址”</label>
             <input id="proxy-input" ref="proxyInput" v-model.trim="form.input" required spellcheck="false" autocomplete="off" placeholder="香港节点 socks5://user:pass@host:1080">
-            <small class="field-hint">支持 HTTP、HTTPS、SOCKS、SOCKS5 和 SOCKS5H</small>
+            <small class="field-hint">支持 HTTP、HTTPS、SOCKS、SOCKS5、SOCKS5H 和 VLESS（vless:// 分享链接）</small>
           </div>
           <div class="modal-actions">
             <button class="button button-secondary" type="button" @click="closeAddModal" :disabled="addLoading">取消</button>

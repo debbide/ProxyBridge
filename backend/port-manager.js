@@ -5,6 +5,10 @@ const tls = require('node:tls');
 const ProxyChain = require('proxy-chain');
 const { isPortConflict } = require('./database');
 const { badRequest } = require('./http-error');
+const { parseVlessLink, isVlessLink } = require('./vless/link');
+const { VlessHttpProxy } = require('./vless/http-proxy');
+
+const SUPPORTED_PROTOCOLS = ['http', 'https', 'socks5', 'socks5h', 'vless'];
 
 function createTunnelAgent(secureSocket) {
   const agent = new https.Agent({ keepAlive: false });
@@ -23,7 +27,16 @@ function checkPortAvailable(host, port) {
   });
 }
 
+// `vless://` links are not a standard proxy URI: the host is the CDN front and
+// the real parameters live in the query string. They are validated by the VLESS
+// parser instead of the generic checks, and are reported as protocol `vless`.
 function parseProxyUri(value) {
+  if (isVlessLink(value)) {
+    // Throws with a specific reason for Reality/gRPC/XTLS and missing fields.
+    parseVlessLink(value);
+    return new URL(String(value).trim());
+  }
+
   const normalizedValue = typeof value === 'string'
     ? value.replace(/^socks:\/\//i, 'socks5://')
     : value;
@@ -36,7 +49,7 @@ function parseProxyUri(value) {
 
   const protocol = parsed.protocol.slice(0, -1).toLowerCase();
   if (!['http', 'https', 'socks5', 'socks5h'].includes(protocol)) {
-    throw new Error('仅支持 HTTP、HTTPS、SOCKS5 和 SOCKS5H 代理');
+    throw new Error('仅支持 HTTP、HTTPS、SOCKS5、SOCKS5H 和 VLESS 代理');
   }
   if (!parsed.hostname || !parsed.port) {
     throw new Error('代理链接必须包含主机和端口');
@@ -148,11 +161,20 @@ class PortManager {
         throw new Error(`本地端口 ${proxy.local_port} 已被占用`);
       }
 
-      const server = new ProxyChain.Server({
-        host: this.host,
-        port: proxy.local_port,
-        prepareRequestFunction: () => ({ upstreamProxyUrl: proxy.uri })
-      });
+      // VLESS cannot be expressed as an upstream URL for proxy-chain, so it gets
+      // our own listener that tunnels both CONNECT and plain HTTP.
+      const server = isVlessLink(proxy.uri)
+        ? new VlessHttpProxy({
+          host: this.host,
+          port: proxy.local_port,
+          uri: proxy.uri,
+          logger: (message) => console.log(`[proxy ${proxy.id}] ${message}`)
+        })
+        : new ProxyChain.Server({
+          host: this.host,
+          port: proxy.local_port,
+          prepareRequestFunction: () => ({ upstreamProxyUrl: proxy.uri })
+        });
 
       try {
         await server.listen();
@@ -198,11 +220,20 @@ class PortManager {
   async testProxy(uri, targetUrl, timeoutMs = 15000) {
     parseProxyUri(uri);
     const port = await this.findTemporaryPort();
-    const server = new ProxyChain.Server({
-      host: this.host,
-      port,
-      prepareRequestFunction: () => ({ upstreamProxyUrl: uri })
-    });
+    const server = isVlessLink(uri)
+      ? new VlessHttpProxy({
+        host: this.host,
+        port,
+        uri,
+        // The probe only needs one tunnel; a large pool would be wasted here.
+        maxTunnels: 4,
+        idleTimeoutMs: timeoutMs
+      })
+      : new ProxyChain.Server({
+        host: this.host,
+        port,
+        prepareRequestFunction: () => ({ upstreamProxyUrl: uri })
+      });
     const startedAt = Date.now();
 
     try {

@@ -33,33 +33,79 @@ class VlessTunnelError extends Error {
   }
 }
 
-// Presents the payload stream of a tunnel: the VLESS response header is
-// consumed during setup, everything after it is the target's data.
+// Presents the payload stream of a tunnel. The VLESS request header is
+// prepended to the first client payload, while the response header is removed
+// lazily from the first server payload. This avoids deadlocking with servers
+// that do not reply until they receive actual target data.
 class TunnelStream extends Duplex {
-  constructor(connection, { onClose, initial } = {}) {
+  constructor(connection, { requestHeader, handshakeTimeoutMs, onClose } = {}) {
     super({ allowHalfOpen: true });
     this.connection = connection;
+    this.requestHeader = requestHeader;
+    this.requestSent = false;
+    this.responseHeaderRead = false;
+    this.responseBuffer = Buffer.alloc(0);
     this.onClose = onClose;
     this.settled = false;
     this.bytesRead = 0;
     this.bytesWritten = 0;
 
-    // Payload bytes that arrived together with the VLESS response header are
-    // buffered before the reader attaches, so none of the first packet is lost.
-    if (initial && initial.length > 0) {
-      this.bytesRead += initial.length;
-      this.push(initial);
+    this.handshakeTimer = handshakeTimeoutMs > 0
+      ? setTimeout(() => {
+        if (!this.responseHeaderRead) {
+          this.destroy(new VlessTunnelError('等待 VLESS 响应头超时'));
+        }
+      }, handshakeTimeoutMs)
+      : null;
+    this.handshakeTimer?.unref?.();
+
+    connection.on('data', (chunk) => this.consumeResponse(chunk));
+    connection.on('end', () => {
+      if (!this.responseHeaderRead) {
+        this.destroy(new VlessTunnelError('VLESS 隧道在响应头返回前被关闭'));
+        return;
+      }
+      this.push(null);
+    });
+    connection.on('error', (error) => {
+      this.destroy(new VlessTunnelError(`VLESS 隧道出错：${error.message}`, { cause: error }));
+    });
+    connection.on('close', () => this.finalize());
+  }
+
+  consumeResponse(chunk) {
+    if (this.responseHeaderRead) {
+      this.bytesRead += chunk.length;
+      if (!this.push(chunk)) this.connection.pause();
+      return;
     }
 
-    connection.on('data', (chunk) => {
-      this.bytesRead += chunk.length;
-      if (!this.push(chunk)) {
-        connection.pause();
-      }
-    });
-    connection.on('end', () => this.push(null));
-    connection.on('error', (error) => this.destroy(error));
-    connection.on('close', () => this.finalize());
+    this.responseBuffer = this.responseBuffer.length === 0
+      ? chunk
+      : Buffer.concat([this.responseBuffer, chunk]);
+    if (this.responseBuffer.length < 2) return;
+
+    const size = responseHeaderSize(this.responseBuffer);
+    if (this.responseBuffer.length < size) return;
+
+    const version = this.responseBuffer[0];
+    if (version !== 0x00) {
+      this.destroy(new VlessTunnelError(`VLESS 响应版本不受支持：${version}`));
+      return;
+    }
+
+    this.responseHeaderRead = true;
+    if (this.handshakeTimer) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
+
+    const payload = this.responseBuffer.subarray(size);
+    this.responseBuffer = Buffer.alloc(0);
+    if (payload.length > 0) {
+      this.bytesRead += payload.length;
+      if (!this.push(payload)) this.connection.pause();
+    }
   }
 
   finalize() {
@@ -144,7 +190,12 @@ class TunnelStream extends Duplex {
 
   _write(chunk, encoding, callback) {
     this.bytesWritten += chunk.length;
-    this.connection.send(chunk).then(() => callback(), (error) => callback(error));
+    let payload = chunk;
+    if (!this.requestSent) {
+      this.requestSent = true;
+      payload = Buffer.concat([this.requestHeader, chunk]);
+    }
+    this.connection.send(payload).then(() => callback(), (error) => callback(error));
   }
 
   _final(callback) {
@@ -295,38 +346,46 @@ class VlessDialer {
 
   async dialOnce({ address, host, port }) {
     const startedAt = Date.now();
-    const socket = await connectTls({
-      address,
-      port: this.link.port,
-      servername: this.link.sni,
-      timeoutMs: this.connectTimeoutMs,
-      rejectUnauthorized: this.rejectUnauthorized,
-      alpn: this.link.alpn
-    });
-
+    const paths = this.link.path === '/' ? ['/', '/ws'] : [this.link.path];
     let connection;
-    try {
-      connection = await upgrade(socket, {
-        host: this.link.wsHost,
-        path: this.link.path,
-        headers: {
-          host: this.link.wsHost,
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        timeoutMs: this.handshakeTimeoutMs
+    let lastUpgradeError = null;
+
+    for (let index = 0; index < paths.length; index += 1) {
+      const path = paths[index];
+      const socket = await connectTls({
+        address,
+        port: this.link.port,
+        servername: this.link.sni,
+        timeoutMs: this.connectTimeoutMs,
+        rejectUnauthorized: this.rejectUnauthorized,
+        alpn: this.link.alpn
       });
-    } catch (error) {
-      socket.destroy();
-      throw new VlessTunnelError(`WebSocket 握手失败：${error.message}`, { address, cause: error });
+
+      try {
+        connection = await upgrade(socket, {
+          host: this.link.wsHost,
+          path,
+          headers: {
+            host: this.link.wsHost,
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          },
+          timeoutMs: this.handshakeTimeoutMs
+        });
+        if (path !== this.link.path) {
+          this.logger(`vless WebSocket 路径 ${this.link.path} 失败，使用兼容路径 ${path} 成功`);
+        }
+        break;
+      } catch (error) {
+        lastUpgradeError = error;
+        socket.destroy();
+        if (index < paths.length - 1) {
+          this.logger(`vless WebSocket 路径 ${path} 失败，重新建立 TLS 后尝试兼容路径 ${paths[index + 1]}：${error.message}`);
+        }
+      }
     }
 
-    let leftover = Buffer.alloc(0);
-    try {
-      await connection.send(this.buildHeader({ host, port }));
-      leftover = await readResponseHeader(connection, this.handshakeTimeoutMs);
-    } catch (error) {
-      connection.destroy();
-      throw new VlessTunnelError(`VLESS 握手失败：${error.message}`, { address, cause: error });
+    if (!connection) {
+      throw new VlessTunnelError(`WebSocket 握手失败：${lastUpgradeError ? lastUpgradeError.message : '未知错误'}`, { address, cause: lastUpgradeError });
     }
 
     const latency = Date.now() - startedAt;
@@ -334,7 +393,10 @@ class VlessDialer {
     this.stats.lastAddress = address;
     this.stats.lastLatency = latency;
 
-    const stream = new TunnelStream(connection, { initial: leftover });
+    const stream = new TunnelStream(connection, {
+      requestHeader: this.buildHeader({ host, port }),
+      handshakeTimeoutMs: this.handshakeTimeoutMs
+    });
 
     if (this.keepAliveMs > 0) {
       // Cloudflare drops idle WebSockets after roughly 100s, so a ping well

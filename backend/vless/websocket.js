@@ -328,16 +328,23 @@ function upgrade(socket, { host, path = '/', headers = {}, timeoutMs = 10000 } =
         return;
       }
       const statusCode = Number(statusMatch[1]);
-      if (statusCode !== 101) {
-        fail(new Error(`WebSocket 握手失败，HTTP ${statusCode}`));
-        return;
-      }
 
       const responseHeaders = new Map();
       for (const line of lines) {
         const index = line.indexOf(':');
         if (index === -1) continue;
         responseHeaders.set(line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim());
+      }
+
+      if (statusCode !== 101) {
+        const details = [
+          responseHeaders.get('server') ? `server=${responseHeaders.get('server')}` : '',
+          responseHeaders.get('location') ? `location=${responseHeaders.get('location')}` : '',
+          responseHeaders.get('cf-ray') ? `cf-ray=${responseHeaders.get('cf-ray')}` : '',
+          responseHeaders.get('content-type') ? `content-type=${responseHeaders.get('content-type')}` : ''
+        ].filter(Boolean).join(', ');
+        fail(new Error(`WebSocket 握手失败，HTTP ${statusCode}${details ? `（${details}）` : ''}`));
+        return;
       }
 
       if ((responseHeaders.get('upgrade') || '').toLowerCase() !== 'websocket') {

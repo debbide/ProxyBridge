@@ -85,6 +85,23 @@ function normalizeAddress(value) {
   return net.isIP(text) ? text : null;
 }
 
+// Keep both address families inside the dialer's small attempt budget. IPv6 is
+// started first because an IPv4-only host reaches the IPv4 candidate after the
+// short family delay, while an IPv6-only host no longer waits for IPv4 timeout.
+function interleaveFamilies(addresses, preferredFamily = 6) {
+  const v4 = addresses.filter((address) => net.isIP(address) === 4);
+  const v6 = addresses.filter((address) => net.isIP(address) === 6);
+  const first = preferredFamily === 4 ? v4 : v6;
+  const second = preferredFamily === 4 ? v6 : v4;
+  const result = [];
+  const count = Math.max(first.length, second.length);
+  for (let index = 0; index < count; index += 1) {
+    if (first[index]) result.push(first[index]);
+    if (second[index]) result.push(second[index]);
+  }
+  return result;
+}
+
 async function resolveHost(host, { timeoutMs = 5000 } = {}) {
   const value = String(host ?? '').trim();
   if (!value) return [];
@@ -170,6 +187,7 @@ class CloudflareEdgePool {
     maxAddresses = 24,
     timeoutMs = 5000,
     cooldownMs = 5 * 60 * 1000,
+    successCacheMs = 5 * 60 * 1000,
     random = Math.random,
     now = () => Date.now()
   } = {}) {
@@ -181,10 +199,12 @@ class CloudflareEdgePool {
     this.maxAddresses = maxAddresses;
     this.timeoutMs = timeoutMs;
     this.cooldownMs = cooldownMs;
+    this.successCacheMs = successCacheMs;
     this.random = random;
     this.now = now;
     this.failures = new Map();
     this.latency = new Map();
+    this.lastSuccess = null;
     this.measuredAt = 0;
     this.cachedCandidates = null;
   }
@@ -230,6 +250,7 @@ class CloudflareEdgePool {
 
   reportSuccess(address, latency) {
     this.failures.delete(address);
+    this.lastSuccess = { address, at: this.now() };
     if (Number.isFinite(latency)) {
       this.latency.set(address, latency);
     }
@@ -278,7 +299,15 @@ class CloudflareEdgePool {
     });
 
     const ordered = [...byLatency(fresh), ...byLatency(cooling)];
-    return ordered.length > 0 ? ordered : candidates;
+    const preferredFamily = this.lastSuccess && !this.isCoolingDown(this.lastSuccess.address)
+      ? net.isIP(this.lastSuccess.address)
+      : 6;
+    const interleaved = interleaveFamilies(ordered, preferredFamily);
+    if (this.lastSuccess && (this.now() - this.lastSuccess.at) < this.successCacheMs) {
+      const cached = this.lastSuccess.address;
+      return [cached, ...interleaved.filter((address) => address !== cached)];
+    }
+    return interleaved.length > 0 ? interleaved : candidates;
   }
 
   snapshot() {
